@@ -1,0 +1,4 @@
+while ($true) {
+    ipconfig /renew
+    Start-Sleep -Seconds 10
+}
