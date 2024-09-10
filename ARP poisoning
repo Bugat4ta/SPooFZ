@@ -1,0 +1,3 @@
+run cmd as admin
+
+arp -a targets_ip  your_mac_addr
